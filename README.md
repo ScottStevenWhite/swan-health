@@ -20,12 +20,12 @@ Most health apps are:
 
 **Swan Health** is a full-stack web application designed to fix this:
 
-- Models **real physiology and life situations** (temporary states).
+- Models **real physiology and life situations** via **Body Profiles** and **Temporary States**.
 - Designs **family-scale meal plans** that hit nutrient goals.
 - Respects **diet preferences and medical requirements**.
 - Keeps users **within a budget** and helps find cheaper options.
 - Gently helps users **reduce waste and eco footprint**, without guilt.
-- Watches how you’re doing and offers **feedback and Autopilot adjustments**, so you don’t have to constantly micromanage.
+- Watches how you’re doing and offers **feedback and safe Autopilot adjustments**, so you don’t have to constantly micromanage.
 
 Guiding principle:
 
@@ -38,6 +38,14 @@ The long-term vision: A system that makes “eating well, for cheap, for the who
 ## 2. Core Product Concepts
 
 Each concept below notes what it **feeds** (who consumes its data) and **depends on** (what it relies on). This is to keep interactions clear and avoid painting ourselves into a corner.
+
+Swan has one backbone:
+
+- **People & households**
+- **States & goals**
+- **Plans & tracking**
+
+Everything else (cost, feedback, eco, future modules) hangs off that backbone.
 
 ---
 
@@ -71,7 +79,7 @@ Children are first-class citizens:
 - Family Scaling Engine (per-person needs).
 - Future modules:
   - Exercise Planner
-  - Medical Data, Longevity Engine
+  - Medical Data & Longevity Engine
   - Sex-specific health modules
 
 **Depends on:**
@@ -82,18 +90,30 @@ Children are first-class citizens:
 
 ### 2.2 Temporary States (Life Modes)
 
-People move through phases. Swan explicitly models **Temporary States** that significantly shift needs:
+People move through phases. Swan explicitly models **Temporary States** that significantly shift needs.
+
+Conceptually, a Temporary State looks like:
+
+- `kind`: broad family  
+  - e.g. `EXERCISE`, `MEDICAL`, `WOMENS_HEALTH`, `MENS_HEALTH`, `MENTAL`, `NUTRITIONAL`
+- `type`: specific label  
+  - e.g. `PREGNANCY_TRIMESTER_2`, `SURGERY_RECOVERY`, `MARATHON_PREP`, `CUTTING_PHASE`
+- `startDate`, `endDate`
+- `metadata`: structured, type-specific details (e.g. trimester number, due date, surgery type, etc.)
 
 Examples:
 
 - Pregnancy (with trimester awareness)
 - Lactation
 - Cancer treatment phases
-- Surgery prep
-- Surgery recovery
+- Surgery prep & recovery
 - Marathon / endurance prep
 - Cutting / bulking cycles
 - Acute illness / recovery
+- Future:
+  - Exercise phases
+  - Women’s health phases (cycle, perimenopause, menopause)
+  - Men’s health focus states
 
 Each state:
 
@@ -104,7 +124,7 @@ Each state:
   - Micronutrient targets
 - Can layer with others (e.g., “marathon prep + low sodium requirement”).
 
-The state system is designed so adding new states is additive, not a schema rewrite.
+Important: the state system is **additive**. Adding new states is a matter of defining new types and metadata, not rewriting schemas.
 
 **Feeds:**
 
@@ -115,6 +135,7 @@ The state system is designed so adding new states is additive, not a schema rewr
   - Exercise states
   - Medical states
   - Women’s/Men’s health states
+  - Longevity Engine
 
 **Depends on:**
 
@@ -124,7 +145,7 @@ The state system is designed so adding new states is additive, not a schema rewr
 
 ### 2.3 Goals & Targets
 
-Users define what “better” looks like:
+Users define what “better” looks like.
 
 - **Body Goals**
   - Target weight
@@ -132,7 +153,7 @@ Users define what “better” looks like:
   - Target body composition
 - **Energy & Macros**
   - Daily calorie target (auto-calculated → user can override)
-  - Macro targets (g / day or % of calories)
+  - Macro targets (g/day or % of calories)
 - **Micronutrients**
   - Vitamins, minerals, omega-3s, etc.
   - Daily & weekly ranges, not just single numbers
@@ -150,6 +171,19 @@ The system:
    - Feedback engine
    - Autopilot
    - Future: Exercise, Medical, Longevity views
+
+A **GoalSet** is:
+
+- **Versioned** and **time-bound**:
+  - `validFrom`, `validTo` (or `null` for current).
+  - `version` number for optimistic locking.
+- **Source-tagged**:
+  - `source`: `USER` | `AUTOPILOT` | `DEFAULT`.
+
+When goals change:
+
+- We create a **new** GoalSet rather than mutating the old one.
+- Historical analyses and feedback can always reference the exact GoalSet they used.
 
 **Feeds:**
 
@@ -218,7 +252,7 @@ Daily intake is tracked via:
   - Named and time-stamped (e.g., “Breakfast”, “Dinner”, “Post-workout shake”).
 - **Foods / Recipe Portions**
   - Ingredient-level breakdown where available.
-  - Stored per 100g or per serving.
+  - Stored per 100g or per serving where appropriate.
 
 From this, Swan computes:
 
@@ -243,17 +277,22 @@ Meal logs also drive:
 **Depends on:**
 
 - Meal/Recipe/Ingredient definitions.
-- PersonProfile & MealPlan (optional, for comparison).
+- PersonProfile & MealPlan (optional, for plan vs actual comparison).
 
 ---
 
 ### 2.6 Meal Planning (1–6+ Week Plans)
 
-The Meal Planner is the core engine of Swan Health. Its job is to synthesize **all** relevant information — bodies, goals, budgets, preferences, meds, supplements, equipment, eco goals, family composition — and turn that into **one coherent plan** that real humans can actually follow.
+The Meal Planner is the **core engine** of Swan Health. Its job is to synthesize **all** relevant information — bodies, goals, budgets, preferences, meds, supplements, equipment, eco goals, family composition — and turn that into **one coherent plan** that real humans can actually follow.
 
 The key outcome is simple:
 
 > “Tell me what to cook and how much everyone should eat, so our health, budget, and values are all respected — with minimal thinking from me.”
+
+We design the planner in **phases**:
+
+- **Planner v1**: operate at the level of *whole recipes and portions* (no fancy within-recipe re-optimizations).
+- **Planner v2+**: add ingredient-level tweaks and eco-aware substitutions once v1 is solid, explainable, and fast.
 
 ---
 
@@ -263,16 +302,17 @@ The key outcome is simple:
 - Each day is composed of **meal slots**:
   - Breakfast, lunch, dinner, snacks, or custom slots.
 - Each slot is filled by:
-  - A **recipe** (e.g., “Chickpea Curry with Rice”)
-  - Or a **pattern** (e.g., “Oats + fruit + protein” that can be instantiated with different ingredients).
+  - A **recipe** (e.g., “Chickpea Curry with Rice”)  
+  - Or (later) a **pattern** (e.g., “Oats + fruit + protein” that can be instantiated with different ingredients).
 
 Under the hood, each recipe and pattern carries:
 
-- Nutrient profile (macros + micros).
+- Nutrient profile (macros + key micros).
 - Ingredient list & quantities.
 - Cost and price sensitivity (via Cost Engine).
-- Eco attributes (waste risk, packaging, CO₂ — future).
+- Eco attributes (waste risk, packaging, CO₂ — once available).
 - Equipment needs and prep complexity.
+- Tags (kid-friendly, spicy, quick, batch-cookable, etc.).
 
 ---
 
@@ -291,6 +331,7 @@ Given a prospective plan, the system can answer:
 - **Money**
   - “What will this plan cost at our preferred stores?”
   - “Which recipes drive most of the cost?”
+  - “What happens if we swap expensive recipes for cheaper ones?”
 
 - **Waste & Eco** (future)
   - “Which ingredients are at high risk of being wasted?”
@@ -324,7 +365,7 @@ The planner doesn’t work in isolation; it consumes nearly all the core configu
 
 - **Household Inputs**
   - Household members & their profiles.
-  - Budget (weekly/monthly, per household, optional per person).
+  - Budget (weekly/monthly, per household, optionally per person).
   - EcoProfile (future):
     - Priority for waste reduction, CO₂, packaging, within cost constraints.
   - Kitchen Equipment inventory:
@@ -334,14 +375,14 @@ The planner doesn’t work in isolation; it consumes nearly all the core configu
     - Days designated for leftovers or eating out.
 
 - **Recipe Pool**
-  - A large catalog of recipes with:
+  - A catalog of recipes with:
     - Nutrient profiles.
     - Ingredient lists & units.
     - Equipment requirements.
-    - Cost & eco metadata (once available).
+    - Cost & eco metadata (when available).
     - Tags (kid-friendly, spicy, quick, batch-cookable, etc.).
 
-The planner uses these as **constraints** and **preferences** when generating or evaluating plans.
+The planner uses these as **hard constraints** and **soft preferences** when generating or evaluating plans.
 
 ---
 
@@ -352,10 +393,10 @@ The Meal Planning Algorithm is designed to:
 1. **Keep you within budget**
    - Use ingredient prices (from Cost Engine) and ShoppingList to:
      - Estimate total plan cost.
-     - Avoid plans that exceed your budget.
+     - Avoid plans that exceed your budget (especially when budget is marked as strict).
      - Suggest cheaper recipes when cost pressure is high.
 
-2. **Generate delicious meals**
+2. **Generate meals you’ll actually want to eat**
    - Respect DietPreferences:
      - Preferred patterns (e.g., Mediterranean, vegan-preferring).
      - Liked ingredients and cuisines.
@@ -371,23 +412,20 @@ The Meal Planning Algorithm is designed to:
      - Show store-wise breakdown.
      - Surface deals and substitutions.
 
-4. **Keep food waste down**
+4. **Keep food waste down** (progressively)
+   - v1: Simple reuse of perishable ingredients within the week and “use-up” recipes.
+   - v2+: Incorporate WasteLog signals, at-risk ingredients, and leftovers more deeply.
    - Design plans that:
      - Reuse perishable items across adjacent days.
      - Leverage “use-up” meals (soups, stir-fries, frittatas) for likely leftovers.
-   - Use WasteLog (future) and ShoppingList deltas to:
-     - Infer which ingredients often get wasted.
-     - Bias future plans toward:
-       - Frozen/shelf-stable alternatives.
-       - Smaller batch sizes or different recipes.
 
 5. **Ensure every family member hits their nutritional targets**
-   - Use Family Scaling Engine:
+   - Use the **Family Scaling Engine**:
      - Compute batch sizes and per-person portions from a single dish.
    - Ensure:
      - Per-person calorie target (± allowed margin).
      - Macro alignment.
-     - Coverage of key micronutrients over the week.
+     - Coverage of key micronutrients over the week (planner-level, not micro-managed in scaling).
 
 6. **Account for supplements and prescriptions**
    - Integrate supplement/med schedules into the plan:
@@ -404,8 +442,9 @@ The Meal Planning Algorithm is designed to:
    - Never let eco or budget optimizations override **medical constraints**.
 
 8. **Hit caloric & macro targets for each family member**
-   - The algorithm treats each person as a separate **constraint set**:
+   - Treat each person as a **separate constraint set**:
      - Calories, macros (and later, key micros) must be satisfied per person, using shared meals and portioning rules.
+   - Avoid obviously bad allocations (e.g., toddler getting a larger portion than the parent).
 
 9. **Use the kitchen equipment you actually own**
    - Recipes carry equipment tags.
@@ -419,11 +458,11 @@ The Meal Planning Algorithm is designed to:
       - Portion guidance per family member, integrating:
         - Food portions (e.g., “Dad 600g curry + 1 toast + multivitamin”).
         - Supplements (e.g., “Mom 300g stew + 2 toast + prenatal with food”).
-    - This is critical:
-      - The cook doesn’t manage five micro-meal plans; they cook once and plate according to guidance.
+    - The cook doesn’t manage five micro-meal plans; they cook once and plate according to guidance.
 
-11. **Make small tweaks to recipes when useful**
-    - Planner (and later Autopilot) can propose micro-changes like:
+11. **Make small tweaks to recipes when useful (phase 2+)**
+    - Initially, the planner only operates at **whole-recipe and portions** level.
+    - Later phases can propose micro-changes like:
       - “Use olive oil instead of butter for better fat profile.”
       - “Swap half the white rice for beans to boost fiber and protein.”
       - “Use reduced-sodium broth to respect low-sodium requirement.”
@@ -431,17 +470,56 @@ The Meal Planning Algorithm is designed to:
       - Nutritional impact.
       - Cost delta.
       - Preference/requirement compliance.
+    - These tweaks are optional, and never required for Planner v1.
 
 ---
 
-#### 2.6.5 How the Planner Uses All This (High-Level Algorithm)
+#### 2.6.5 Plan Scoring & Explanations
 
-Conceptually, the planner treats meal planning as a **constrained optimization problem**:
+To avoid a black-box planner, Swan uses explicit scoring and explanations.
+
+Conceptually:
+
+- **PlanMetrics**
+  - Nutrition error per person (daily + weekly).
+  - Budget delta (PlanCost – Budget).
+  - Variety index.
+  - (Future) Eco estimates (CO₂, waste risk).
+- **PlanScoreWeights**
+  - `nutrition`
+  - `budget`
+  - `variety`
+  - `eco` (later)
+- **PlanScore**
+  - `overall` score (0–1 or similar).
+  - Embedded `weights` and `metrics`.
+
+When the planner or Autopilot changes something, it produces a **PlanChangeExplanation**:
+
+- `operation`:
+  - `SWAP_RECIPE`, `ADJUST_PORTIONS`, `ADD_MEAL`, `REMOVE_MEAL`, etc.
+- `reason`:
+  - `PROTEIN_DEFICIT`, `OVER_BUDGET`, `VARIETY_TOO_LOW`, `ECO_IMPROVEMENT`, etc.
+- `metricsBefore`, `metricsAfter`
+- `affectedDays`
+
+These explanations are:
+
+- Displayed in the UI (“We swapped X → Y because…”)  
+- Used in debugging and tests.
+
+If you can’t explain why the plan changed in one sentence, the system did something wrong.
+
+---
+
+#### 2.6.6 How the Planner Uses All This (High-Level Algorithm)
+
+Conceptually, the planner treats meal planning as a **constrained optimization problem** with a pragmatic, explainable algorithm.
 
 - **Hard constraints**:
   - DietRequirements (no gluten, low sodium max, allergies).
   - Required diet patterns (e.g., vegan REQUIRED).
-  - Budget ceilings (do not exceed X).
+  - Strict budget ceilings (when configured).
   - Equipment limitations.
   - Family membership & basic per-person calorie bounds.
 
@@ -453,7 +531,7 @@ Conceptually, the planner treats meal planning as a **constrained optimization p
   - Eco goals (future eco weight).
   - Simplicity (fewer distinct recipes, more batch-cooking).
 
-The algorithm works in **phases**, roughly:
+**Planner v1 phases:**
 
 1. **Filter candidate recipes**
    - Remove any that violate hard constraints (requirements, equipment).
@@ -462,10 +540,13 @@ The algorithm works in **phases**, roughly:
 2. **Construct a baseline plan**
    - Start from:
      - User-anchored recipes (favorites the user insists on).
-     - Simple heuristics (protein at each main meal, veg at lunch/dinner, etc.).
+     - Simple heuristics:
+       - Protein at each main meal.
+       - Veg at lunch/dinner.
+       - Reasonable variety.
    - Fill remaining slots with candidates that:
      - Move the plan closer to per-person macro & kcal targets.
-     - Respect budgets heuristically.
+     - Stay roughly within budget.
 
 3. **Evaluate the plan**
    - Compute:
@@ -483,8 +564,10 @@ The algorithm works in **phases**, roughly:
    - Apply localized operations:
      - Swap a single recipe.
      - Adjust recipe servings.
-     - Apply small ingredient tweaks.
-   - Re-evaluate; keep changes if the overall score improves and no constraints are broken.
+   - Re-evaluate; keep changes if:
+     - The overall PlanScore improves.
+     - No constraints are broken.
+     - Changes remain within user-configured Autopilot bounds (if Autopilot is driving it).
 
 5. **Family scaling & serving instructions**
    - Once the plan is stable:
@@ -498,29 +581,7 @@ The algorithm works in **phases**, roughly:
        - “Cheaper plan.”
        - “More protein focus.”
        - “Less prep time.”
-     - The planner re-runs optimization under new biases.
-
----
-
-#### 2.6.6 Feeds & Dependencies (unchanged, but now richer)
-
-**Feeds:**
-
-- ShoppingList & Cost Engine.
-- Family Scaling Engine.
-- Feedback & Autopilot:
-  - Planner outputs are the canvas Autopilot modifies.
-- Eco Engine (future):
-  - Projected waste, packaging, CO₂ from the plan.
-
-**Depends on:**
-
-- Recipes & Ingredients with:
-  - Nutrition, cost, equipment, and (future) eco metadata.
-- GoalSet (per person).
-- DietPreferences & DietRequirements.
-- Budget constraints.
-- (Future) EcoProfile, WasteLog, etc.
+     - The planner re-runs optimization with updated biases.
 
 ---
 
@@ -544,14 +605,20 @@ Swan:
 2. Computes total household needs.
 3. Scales recipes at the **batch level** to match the total needs.
 4. Uses the **Family Scaling Engine** to determine per-person portions:
-   - As percentages (“Dad: 25% of pan”)
-   - As grams/ounces (“Dad: 420g, Mom: 350g, etc.”)
+   - As percentages (“Dad: 25% of pan”).
+   - As grams/ounces (“Dad: 420g, Mom: 350g, etc.”).
+   - Where possible, as **friendly kitchen units** (“≈ ¾ cup”, “≈ 2 ladles”).
 
 The engine tries to:
 
-- Preserve each person’s macro ratio.
-- Meet critical nutrient requirements, especially when resources are tight.
-- Avoid silly results (e.g., toddler portion bigger than adult portion).
+- Preserve each person’s **macro ratio**.
+- Meet critical nutrient requirements (especially protein and medically relevant nutrients).
+- Respect simple **invariants**:
+  - Toddlers never get larger portions than adults for the same dish.
+  - No person participating in the meal gets a 0 portion unless explicitly excluded.
+  - Portion sizes stay within reasonable ranges for the person’s age and needs.
+
+Micronutrients are primarily handled at the **planner level** (what recipes to cook, how often), not at the scaling level. Scaling focuses on energy and macro distribution first, while avoiding obviously wrong allocations.
 
 Outcome:
 
@@ -566,16 +633,15 @@ Outcome:
 
 **Depends on:**
 
-- PersonProfile & Goals.
+- PersonProfile & GoalSet.
 - MealPlan recipes & totals.
+- Household & participation rules.
 
 ---
 
 ### 2.8 Handling Real-Life Deviations (Restaurants, Holidays)
 
-People eat out and break plans.
-
-Swan explicitly models:
+People eat out and break plans. Swan explicitly models this instead of pretending it won’t happen.
 
 - **Restaurant Meals**
   - Freeform logging or selecting from a database.
@@ -617,11 +683,11 @@ This feeds directly into **Feedback** and **Autopilot** (and later, eco coaching
 
 Food isn’t just macros; it’s culture, ethics, and medical reality.
 
-Swan splits this into:
+Swan splits this into **Preferences** vs **Requirements**:
 
 #### 2.9.1 Diet Preferences
 
-These describe what you *want* your diet to look like:
+These describe what you *want* your diet to look like.
 
 - **High-level patterns**:
   - Vegan
@@ -646,7 +712,7 @@ The planner:
 
 - Avoids **disliked** ingredients where possible.
 - Prioritizes recipes that match **preferred patterns**.
-- Honors **required patterns** as hard constraints.
+- Honors **required patterns** as **hard constraints**.
 
 #### 2.9.2 Diet Requirements (Medical / Hard Constraints)
 
@@ -665,7 +731,8 @@ These are treated as **hard constraints**:
 
 - Recipes and foods violating requirements:
   - Are excluded from recommendations.
-  - Are flagged clearly if logged manually.
+  - Are clearly flagged if logged manually.
+- Autopilot and planner are not allowed to override them for cost or eco reasons.
 
 The planner, scaling engine, and Autopilot must all respect these.
 
@@ -695,23 +762,27 @@ Key ideas:
     - Weekly grocery budget.
     - Monthly food budget.
   - Currency and local context.
+  - Can be marked as:
+    - `flexible` (advisory) or
+    - `strict` (hard constraint).
 
 - **Cost Awareness**
   - Each ingredient (or product) has:
     - Price per unit (e.g., per kg or per package).
     - Store-specific variation.
-  - Meal plans generate a **shopping list** with estimated total cost.
+  - Meal plans generate a **ShoppingList** with estimated total cost.
 
 - **Local Price Lookups**
   - Integrations with:
-    - Grocery store APIs OR
+    - Grocery store APIs or
     - Price aggregator APIs.
   - Use user’s location (e.g. ZIP/postal code) and chosen stores.
   - Cache results and refresh periodically.
+  - Data may be incomplete; cost logic always treats “unknown price” as **unknown**, not zero.
 
 - **Deal Finder**
   - For each item in the shopping list:
-    - Identify cheapest stores.
+    - Identify cheapest stores (when data exists).
     - Suggest alternatives:
       - “Brand X is 10% cheaper than Brand Y.”
       - “Buying frozen spinach instead of fresh saves $N per week.”
@@ -721,7 +792,8 @@ Key ideas:
     - Shows estimated cost vs budget.
     - Highlights expensive recipes.
     - Suggests lower-cost swaps with similar nutrient coverage:
-      - “Swap salmon for canned sardines 2x/week → save $20/month with similar omega-3.”
+      - “Swap salmon for canned sardines 2×/week → save $20/month with similar omega-3.”
+  - Strict budgets act as **hard constraints** during planning and Autopilot.
 
 - **“App Pays for Itself”**
   - The system can track:
@@ -730,7 +802,7 @@ Key ideas:
   - Over time, it can report:
     - “Estimated $X saved this month compared to your original plan.”
 
-This cost layer interacts tightly with **diet preferences**, **requirements**, **Autopilot**, and, eventually, the **eco module** (because waste reduction often saves money).
+This cost layer interacts tightly with **diet preferences**, **requirements**, **Autopilot**, and the **eco module** (because waste reduction often saves money).
 
 **Feeds:**
 
@@ -742,6 +814,7 @@ This cost layer interacts tightly with **diet preferences**, **requirements**, *
 
 - ShoppingLists derived from MealPlans.
 - Ingredient price data (user input + external APIs).
+- Budget configs.
 
 ---
 
@@ -749,18 +822,22 @@ This cost layer interacts tightly with **diet preferences**, **requirements**, *
 
 Swan should not just say “You logged 83 grams of protein.” It should say “Here’s what that means, and here’s what to change.”
 
+Autopilot adds a **semi-automated coach** that adjusts plans within **strict safety rails**.
+
+---
+
 #### 2.11.1 Feedback Engine
 
 The Feedback Engine consumes:
 
 - Body metrics and trends.
 - Intake logs (meals, supplements, prescriptions).
-- Plan adherence.
+- Plan adherence (plan vs actual).
 - Budget adherence.
-- Temporary states and requirements.
+- TemporaryStates and DietRequirements.
 - (Future) Eco metrics, exercise logs, mental health logs, labs.
 
-It produces **Insights** like:
+It produces **FeedbackInsights** like:
 
 - “You’re consistently 15–20% below your protein target this week.”
 - “Your average sodium intake exceeds your low-sodium target by ~30%.”
@@ -773,59 +850,116 @@ Insights have:
 - Severity (info, warning, critical).
 - Type (nutrition, budget, adherence, medical-aligned, eco, etc.).
 - Suggested actions.
+- A time window they’re based on.
 
-#### 2.11.2 Autopilot Mode
+---
+
+#### 2.11.2 Autopilot Mode (and Its Invariants)
 
 Autopilot is the “just tell me what to do” mode.
 
-User can opt into **Autopilot** per household/person:
+User can opt into **Autopilot** per household/person with a clear config:
 
-- Configurable bounds:
-  - Max % change in daily calories.
-  - Whether to allow recipe substitutions automatically.
-  - How aggressively to optimize for cost vs convenience.
-  - (Future) How much to weight eco improvements vs cost.
-- Autopilot can:
-  - Automatically adjust future days in the meal plan when:
-    - Weight deviates from target trend.
-    - Nutrient deficiencies persist.
-    - Budget is regularly exceeded.
-    - (Future) Waste levels stay high or eco profile targets are not met.
-  - E.g., “Next week, swap two red-meat dinners for cheaper, lower-saturated-fat options.”
+- Max % change in daily calories.
+- Which meals Autopilot is allowed to touch (e.g., “everything except breakfast,” “dinners only”).
+- Whether to allow recipe substitutions automatically or require approval.
+- How aggressively to optimize for cost vs convenience.
+- (Future) How much to weight eco improvements vs cost.
+- Whether the household budget is *strict* or *flexible* for Autopilot.
 
-Autopilot **never**:
+Autopilot:
 
-- Violates **Diet Requirements** (medical constraints).
-- Violates **Required** diet patterns (e.g., vegan).
-- Makes unbounded changes; it always stays within user-defined limits.
+- Uses FeedbackInsights + PlanMetrics to decide if change is warranted.
+- Proposes or applies adjustments to **future** plan days:
+  - Adjust calorie targets within allowed bounds.
+  - Swap specific recipes for cheaper / higher-protein / easier options.
+  - Add or remove snacks.
+  - Bias toward “use-up” recipes if waste is high.
+
+Each change is materialized as an **AutopilotChange** with a linked **PlanChangeExplanation** and before/after snapshots.
+
+**Autopilot invariants (must always hold):**
+
+1. **Medical & diet safety**
+   - Never violates **DietRequirements** (allergies, celiac, etc.).
+   - Never violates **Required** diet patterns (e.g., required vegan).
+   - Never pushes calorie targets below safe, state-aware minimum thresholds (e.g., derived from BMR × factor), especially for kids, pregnancy, or recovery states.
+
+2. **Budget safety**
+   - When budget is marked **strict**:
+     - Autopilot cannot intentionally produce plans whose estimated cost exceeds budget by more than a small tolerance (e.g., 2–3%).
+     - If constraints are impossible to satisfy, it must:
+       - Surface this clearly (“constraints conflict”) instead of silently overshooting.
+
+3. **Scope limitation**
+   - Per Autopilot run:
+     - Only a bounded number of changes (e.g., swap ≤ N meals, adjust ≤ M days of calories) unless the user explicitly opts into an “aggressive overhaul”.
+   - Must respect:
+     - Locked recipes.
+     - Locked days.
+     - “Do not touch breakfast” style rules.
+
+4. **Explainability**
+   - Every AutopilotChange must:
+     - Attach a `PlanChangeExplanation` (operation, reason, metrics before/after).
+     - Be visible in the UI as “what changed and why”.
+
+5. **Version safety**
+   - Autopilot operates on specific versions of:
+     - `MealPlan`
+     - `GoalSet`
+     - `AutopilotConfig`
+   - If the plan or goals changed since the run started:
+     - Version conflict is detected via optimistic locking.
+     - The change is not applied.
+     - We record and show that the run was skipped due to stale data.
+
+**Determinism:**
+
+- For debugging and trust:
+  - Each Autopilot run has a `randomSeed`.
+  - Given the same inputs and `randomSeed`, the same set of changes should be produced.
+  - This allows replaying/diagnosing weird behavior.
+
+---
+
+#### 2.11.3 Feedback + Autopilot Loop
 
 Typical loop:
 
 1. User enables Autopilot with constraints:
    - “You can adjust my calories ±10% and swap recipes, but don’t touch breakfast.”
+   - “Treat our budget as strict.”
 2. System monitors metrics & intake.
-3. When patterns emerge:
-   - Autopilot proposes changes (or applies automatically, based on settings).
-4. User receives:
-   - “Here’s what changed and why” explanation.
+3. When patterns emerge (e.g., persistent calorie surplus, over-budget, recurring deficiency):
+   - Feedback Engine emits insights.
+4. Autopilot evaluates:
+   - Whether the problem is big enough.
+   - Whether changes fit within bounds and invariants.
+5. Autopilot either:
+   - Creates **pending** changes requiring approval.
+   - Applies changes automatically (if allowed).
+6. User sees:
+   - A clear summary:
+     - “We changed X, Y, Z because A, B, C.”
    - Option to revert or adjust Autopilot aggressiveness.
 
-This turns Swan from a **passive tracker** into a **semi-automated coach**.
+Autopilot is **rule-based and data-driven**, not a black-box “magic AI brain”.
 
 ---
 
 ### 2.12 Future: Exercise, Medical Data, Mental Health, Sex-Specific Health, Research, Longevity
 
-These are **not** part of the MVP, but we want to design the current system so these can be added later without upheaval. The key is that they all build on the same foundations:
+These are **not** part of the MVP, but the current system is designed to let these modules plug into the same backbone:
 
-- **Profiles** (persons, households, dependents)
-- **Temporary States** (life modes, phases)
-- **Goals & Targets**
-- **Costs & Budgets**
-- **Feedback Engine**
-- **Autopilot**
+- Profiles (persons, households, dependents)
+- Temporary States (life modes, phases)
+- Goals & Targets
+- Costs & Budgets
+- Feedback Engine
+- Autopilot (for safe, bounded adjustments)
 
-Below, each future lane is fleshed out with enough detail to influence today’s design decisions.
+Below, each future lane is fleshed out enough to influence today’s design decisions.
 
 ---
 
@@ -847,7 +981,7 @@ Close the loop between **energy expenditure** and **energy/nutrient intake**, an
   - Structured phases (base, build, peak, deload).
   - Linked to a specific **GoalSet** (e.g., “run a marathon”, “increase squat by 20%”).
 
-- **ExerciseStates** (a specialized TemporaryState)
+- **ExerciseState** (a specialized TemporaryState)
   - e.g., `MARATHON_PREP`, `REBUILD_AFTER_INJURY`, `GENERAL_FITNESS`.
   - Each state:
     - Modifies energy needs (e.g., +X% calories on training days).
@@ -963,7 +1097,7 @@ Capture basic **mood, stress, and sleep** signals and relate them to nutrition, 
 
 - **MoodLog**
   - Date/time.
-  - Mood scale (e.g. -2 to +2 or 1–10).
+  - Mood scale (e.g., -2 to +2 or 1–10).
   - Optional tags (anxious, energized, flat, etc.).
   - Optional notes.
 
@@ -995,7 +1129,7 @@ Capture basic **mood, stress, and sleep** signals and relate them to nutrition, 
 - **Feedback**
   - Example insights:
     - “On days you sleep < 6h, your snack calories increase by ~30%.”
-    - “High stress days correlate with lower fruit/vegetable intake.”
+    - “High-stress days correlate with lower fruit/vegetable intake.”
 
 - **Autopilot**
   - Very constrained here:
@@ -1041,7 +1175,7 @@ Model sex-specific patterns and needs that affect nutrition, training, and recov
 - **MenHealthState**
   - States like:
     - `MIDDLE_AGE_RISK_FOCUS`
-    - `LOW_TESTOSTERONE_MANAGEMENT` (only as user-labeled context, not diagnosis).
+    - `LOW_TESTOSTERONE_MANAGEMENT` (user-labeled context, not diagnosis).
   - Adjusts:
     - Focus nutrients (e.g., Vitamin D, zinc, etc.).
     - Risk awareness (e.g., cardiometabolic focus).
@@ -1050,15 +1184,15 @@ Model sex-specific patterns and needs that affect nutrition, training, and recov
 
 - **Profiles & States**
   - WomenHealthState and MenHealthState are TemporaryStates with more structured metadata.
-  - Directly tied to PersonProfile’s sex/gender info.
+  - Tied to PersonProfile’s sex/gender info.
 
 - **Goals & Targets**
   - Phase- and state-specific:
-    - E.g. cycle-based micro-adjustments are possible later.
+    - e.g., cycle-based micro-adjustments over time.
     - Pregnancy & lactation heavily influence nutrient/energy targets.
 
 - **Costs**
-  - May surface how specific patterns (e.g., high-quality protein, more produce) impact cost for these needs.
+  - May surface how specific patterns (e.g., higher-quality protein, more produce) impact cost.
 
 - **Feedback**
   - Example insights:
@@ -1068,7 +1202,7 @@ Model sex-specific patterns and needs that affect nutrition, training, and recov
 - **Autopilot**
   - Could:
     - Pre-bias the meal planner around known phases (e.g., higher iron around menstruation).
-    - Suggest more simple, comforting meals during times flagged as high-symptom (user-defined, not algorithmic guesswork).
+    - Suggest more simple, comforting meals during times flagged as high-symptom (user-defined).
 
 **Design Requirements Now:**
 
@@ -1080,7 +1214,7 @@ Model sex-specific patterns and needs that affect nutrition, training, and recov
 #### 2.12.5 Research & Citizen Science
 
 **Purpose:**  
-Enable users to **opt-in** to anonymized data sharing and allow researchers to explore population patterns and run simple studies.
+Enable users to **opt in** to anonymized data sharing and allow researchers to explore population patterns and run simple studies.
 
 **Key Concepts:**
 
@@ -1108,13 +1242,13 @@ Enable users to **opt-in** to anonymized data sharing and allow researchers to e
 **Integration with Existing Foundations:**
 
 - **Profiles & States**
-  - Cohorts often defined based on TemporaryStates, Goals, adherence patterns.
+  - Cohorts defined based on TemporaryStates, Goals, adherence patterns.
 
 - **Goals & Targets**
   - Research may focus on how certain targets vs actual outcomes differ by behavior.
 
 - **Costs**
-  - Some studies may specifically look at:
+  - Some studies may examine:
     - “Impact of budget constraints on nutrient adequacy.”
 
 - **Feedback**
@@ -1126,11 +1260,11 @@ Enable users to **opt-in** to anonymized data sharing and allow researchers to e
 
 **Design Requirements Now:**
 
-- Keep database schema and logging structured enough so:
+- Keep schema and logging structured so:
   - Deidentified aggregates are easy to compute.
-- Keep a clear boundary between:
+- Maintain a clear boundary between:
   - **Operational data** vs **research views** (for privacy and performance).
-- Make sure everything can be **filtered by consent flag**.
+- Ensure everything can be **filtered by consent flag**.
 
 ---
 
@@ -1159,7 +1293,7 @@ Provide a **longevity-oriented view** of the same data: how current habits and t
 **Integration with Existing Foundations:**
 
 - **Profiles & States**
-  - Some States (e.g., `LONG_TERM_WEIGHT_REDUCTION`, `CARDIOMETABOLIC_RISK_FOCUS`) may tune the lens.
+  - Some states (e.g., `LONG_TERM_WEIGHT_REDUCTION`, `CARDIOMETABOLIC_RISK_FOCUS`) tune the lens.
 
 - **Goals & Targets**
   - LongevityGoalSet:
@@ -1183,10 +1317,10 @@ Provide a **longevity-oriented view** of the same data: how current habits and t
 **Design Requirements Now:**
 
 - Store enough **history** (not just latest values) to compute trends over months/years.
-- Keep domain concepts generic enough so adding a “longevity lens” is mostly a matter of:
-  - Adding derived metrics.
-  - Adding new types of FeedbackInsights.
-  - Possibly a LongevityGoalSet layered on top of existing targets.
+- Keep domain concepts generic so a “longevity lens” is:
+  - Mainly derived metrics.
+  - Additional FeedbackInsights.
+  - Possibly a LongevityGoalSet layered on existing targets.
 
 ---
 
@@ -1212,16 +1346,16 @@ This is another consumer of the same spine: Profiles, States, Goals, MealPlans, 
   - `weightCO2Reduction` (0–1)
   - `weightEthicalSourcing` (0–1)
 - Aggressiveness:
-  - `ecoIntensity`: OFF / GENTLE / MODERATE / STRONG
+  - `ecoIntensity`: `OFF` / `GENTLE` / `MODERATE` / `STRONG`
 - Constraints:
   - `maxCostDeltaPercent` (e.g., ≤ 5% extra vs baseline).
   - `allowMorePrepTime` (scale or boolean).
 
 **EcoImpactDefinition (per Ingredient/Recipe)**
 
-- `co2PerKg` (approximate).
-- `packagingType`: {LOOSE/BULK, PAPER, GLASS, METAL, PLASTIC, MIXED}.
-- `packagingScore` (0–1; 1 = very wasteful).
+- `co2PerKg?` (approximate, optional).
+- `packagingType`: {`LOOSE_BULK`, `PAPER`, `GLASS`, `METAL`, `PLASTIC`, `MIXED`}.
+- `packagingScore?` (0–1; 1 = very wasteful).
 - (Optional) `waterLPerKg`, `landUseScore`.
 - (Optional) ethical flags:
   - `animalProduct`
@@ -1229,16 +1363,18 @@ This is another consumer of the same spine: Profiles, States, Goals, MealPlans, 
   - `fairTradeAvailable`
   - `localSeasonality` (by month).
 
+Note: data is often incomplete; calculations treat missing values as **unknown**, not as 0.
+
 **WasteLog**
 
 - Records actual waste events, not just theoretical:
   - `householdId` / `personId`
   - `date`
-  - `wasteType`: FOOD or PACKAGING
+  - `wasteType`: `FOOD` or `PACKAGING`
 - For FOOD:
   - `ingredientId` or `recipeId`
   - `quantity`
-  - `reason`: {EXPIRED, LEFTOVER_NOT_EATEN, COOKED_TOO_MUCH, SPOILED, OTHER}
+  - `reason`: {`EXPIRED`, `LEFTOVER_NOT_EATEN`, `COOKED_TOO_MUCH`, `SPOILED`, `OTHER`}
 - For PACKAGING:
   - `packagingType`
   - `count` or `weight`
@@ -1247,10 +1383,10 @@ This is another consumer of the same spine: Profiles, States, Goals, MealPlans, 
 **EcoMetricSnapshot**
 
 - Precomputed metrics per period (week/month):
-  - `estimatedCO2Kg`
+  - `estimatedCO2Kg?`
   - `estimatedWasteFoodKg`
   - `estimatedPackagingUnits` by type
-  - `ethicalHeuristicScore` (optional/advanced).
+  - `ethicalHeuristicScore?` (optional/advanced).
 
 #### 2.13.2 Metrics & Calculations
 
@@ -1266,7 +1402,8 @@ This is another consumer of the same spine: Profiles, States, Goals, MealPlans, 
 
 - **CO₂ Footprint**
   - Approximate:
-    - `totalCO2 = Σ (consumedMassIngredient × co2PerKgIngredient)`.
+    - `totalCO2 ≈ Σ(consumedMassIngredient × co2PerKgIngredient)`.
+  - Make uncertainty explicit when data is partial.
 
 - **Ethical Impact (Optional, Opt-In)**
   - Based on:
@@ -1285,12 +1422,12 @@ This is another consumer of the same spine: Profiles, States, Goals, MealPlans, 
   - Possible EcoTargets:
     - “Reduce food waste by 20% over 6 months.”
     - “Reduce CO₂ intensity by 10% compared to baseline.”
-  - Always soft goals compared to medical nutrition and budget constraints.
+  - Always **soft** relative to medical nutrition and strict budget constraints.
 
 - **Costs & Budgets**
   - Waste reduction typically **saves money**.
   - Some eco choices may cost more:
-    - EcoProfile + `maxCostDeltaPercent` defines acceptable trade-offs.
+    - EcoProfile + `maxCostDeltaPercent` define acceptable trade-offs.
   - Planner & Autopilot can show:
     - “This swap reduces CO₂ by 30% and saves $4/week.”
     - “This swap reduces CO₂ by 50% but adds $10/week; above your cost tolerance.”
@@ -1304,7 +1441,7 @@ This is another consumer of the same spine: Profiles, States, Goals, MealPlans, 
 - **Autopilot**
   - Respects:
     - DietRequirements.
-    - Budget.
+    - Budget bounds.
     - EcoProfile intensity & cost bounds.
   - Possible changes:
     - Suggest/use “use-up” recipes to consume at-risk ingredients.
@@ -1322,7 +1459,7 @@ This is another consumer of the same spine: Profiles, States, Goals, MealPlans, 
   - Suggest leftover-heavy recipes on certain days.
 
 - **Eco v3 (CO₂ & Packaging)**
-  - Add CO₂ & packaging metadata to ingredients.
+  - Add CO₂ & packaging metadata to ingredients where possible.
   - Show approximated CO₂ & plastic usage per plan.
 
 - **Eco v4 (Ethical / Advanced)**
@@ -1335,19 +1472,22 @@ This is another consumer of the same spine: Profiles, States, Goals, MealPlans, 
 
 ### 3.1 Overview
 
-Swan Health is a **TypeScript monorepo**:
+Swan Health is a **TypeScript monorepo** built around a **single core domain package**:
 
-- **GraphQL API backend** for all application logic.
-- **React/Next.js frontend** for the UI.
-- **PostgreSQL** for relational persistence.
-- **Redis** for caching, pub/sub (subscriptions), job queues.
+- **`core-domain`**: all health, nutrition, planning, cost, feedback, eco, and scaling logic.
+- **GraphQL API backend**: orchestrates domain logic; no business rules live directly in resolvers.
+- **React/Next.js frontend**: uses GraphQL to interact with the domain.
+- **PostgreSQL**: relational persistence.
+- **Redis**: caching, pub/sub (subscriptions), job queues.
 
-Core subsystems:
+Core subsystems (logically):
 
-- **Diet Preference & Requirement Engine**
-- **Cost Engine** (Budgets, Price lookups, Deal finder)
-- **Feedback Engine & Autopilot Engine**
-- **(Future) Eco Engine** (Waste/CO₂/Packaging)
+- Diet Preference & Requirement logic
+- Cost logic (Budgets, Price lookups, Deal finder)
+- Feedback & Autopilot logic
+- (Future) Eco logic (Waste/CO₂/Packaging)
+
+All of these live **in `core-domain`** as pure functions and domain modules. “Engines” are just orchestration layers built around `core-domain`, not separate islands of logic.
 
 ---
 
@@ -1362,15 +1502,25 @@ Core subsystems:
 | DB             | PostgreSQL                                          | Strong relational base. |
 | ORM            | Prisma                                              | Type-safe DB access. |
 | Cache / PubSub | Redis                                               | Subscriptions, caching, job queue. |
-| Jobs           | BullMQ                                              | Feedback/autopilot jobs, price & eco metric refresh. |
+| Jobs           | BullMQ                                              | Feedback/Autopilot runs, price & eco refresh. |
 | Frontend       | Next.js (App Router) + React + TypeScript           | SSR + SPA UX. |
 | GraphQL Client | Apollo Client or urql + GraphQL Code Generator      | Typed hooks, normalized cache. |
 | UI / Styling   | Tailwind CSS + Radix UI / Headless UI               | Rapid, accessible UI. |
-| Forms          | React Hook Form + Zod                               | Typed validation. |
-| Validation     | Zod                                                 | Shared schemas backend/frontend. |
+| Design System  | `@swan/ui` + CSS vars/Tailwind theme                | Shared components and tokens. |
+| Forms          | React Hook Form + Zod                               | Typed validation at edges. |
+| Validation     | Zod (forms/webhooks only)                           | TS types from GraphQL/Prisma elsewhere. |
 | HTTP Clients   | node-fetch / Axios                                  | For price/eco APIs, external data. |
-| Testing        | Vitest/Jest + RTL + Playwright/Cypress              | Unit/integ/E2E. |
+| Testing        | Vitest/Jest + React Testing Library + Playwright    | Unit/integ/E2E. |
 | Observability  | Pino + Prometheus + Grafana                         | Logs & metrics. |
+
+**Type of truth:**
+
+- **Prisma schema** and **GraphQL schema** are authoritative for data shapes.
+- TypeScript types:
+  - Generated from Prisma (`@prisma/client`) and GraphQL codegen.
+- Zod:
+  - Used for UI forms and non-GraphQL ingestion (webhooks, etc.).
+  - Ideally derived from existing input types, not hand-coded duplicates.
 
 ---
 
@@ -1382,21 +1532,31 @@ swan-health/
 │   ├── api/                     # GraphQL API (Node + Fastify)
 │   └── web/                     # Web app (Next.js + React)
 ├── packages/
-│   ├── shared-types/            # Shared TS interfaces, enums
-│   ├── domain/                  # Core domain logic (calculations, rules)
+│   ├── core-domain/             # ALL domain logic (nutrition, planning, cost, feedback, eco)
 │   ├── database/                # Prisma schema, migrations, seeders
 │   ├── graphql-schema/          # Schema builders, resolvers, codegen
 │   ├── ui/                      # Shared UI components, design system
-│   ├── cost-engine/             # Budgeting & price estimation logic
-│   ├── feedback-engine/         # Feedback & Autopilot rules
-│   ├── eco-engine/              # (Future) Waste/CO₂/packaging logic
-│   └── config/                  # ESLint, TSConfig, Prettier, etc.
+│   ├── config/                  # ESLint, TSConfig, Prettier, etc.
+│   └── tooling/                 # Shared scripts, types, utilities
 ├── infra/
 │   ├── docker/                  # Dockerfiles, docker-compose.yml
 │   ├── k8s/                     # (Future) Kubernetes manifests
 │   └── scripts/                 # Setup/maintenance scripts
 └── docs/                        # Design docs, ADRs, spec notes
 ```
+
+Notes:
+
+* `core-domain` is the **only** place where nutrition math, planning logic, Autopilot rules, cost computations, eco calculations, etc. live.
+* `apps/api`:
+
+  * Glues GraphQL to the domain.
+  * Provides `RequestContext` (user, household, roles) to domain calls.
+  * Implements optimistic locking and error translation.
+* `apps/web`:
+
+  * Renders views using GraphQL queries/mutations.
+  * Relies on `@swan/ui` for primitives and design tokens.
 
 ---
 
@@ -1420,6 +1580,47 @@ Existing (high-level):
 
 New / extended for preferences, cost, coaching, and eco:
 
+#### Profiles & States
+
+* **User**
+
+  * Authentication + account-level settings.
+* **Household**
+
+  * Set of people, budgets, eco profile, shared settings.
+* **PersonProfile**
+
+  * Demographics, anthropometrics, baseline info.
+* **BodyMetricLog**
+
+  * Time series of weight, BP, etc.
+* **TemporaryState**
+
+  * `personId`
+  * `kind` (EXERCISE, MEDICAL, WOMENS_HEALTH, etc.)
+  * `type` (PREGNANCY_TRIMESTER_2, MARATHON_PREP, etc.)
+  * `startDate`, `endDate`
+  * `metadata` (JSON with type-specific structure)
+
+#### Goals
+
+* **GoalSet**
+
+  * `id`, `personId`
+  * `validFrom`, `validTo?`
+  * `version`
+  * `source` (USER, AUTOPILOT, DEFAULT)
+  * Energy target
+  * Macro targets
+  * Selected micronutrient targets
+  * Optional lifestyle tags (CUT, BULK, RECOVERY, etc.)
+
+* **GoalTarget** (per nutrient or metric)
+
+  * Type (NUTRIENT, METRIC)
+  * Daily/weekly ranges
+  * Priority / severity
+
 #### Diet & Constraints
 
 * **DietProfile**
@@ -1427,98 +1628,156 @@ New / extended for preferences, cost, coaching, and eco:
   * `personId`
   * List of **DietPattern** entries:
 
-    * `pattern` (e.g., VEGAN, VEGETARIAN, PALEO)
-    * `mode`: `REQUIRED` or `PREFERRED`
+    * `pattern` (VEGAN, VEGETARIAN, MEDITERRANEAN, etc.)
+    * `mode`: REQUIRED | PREFERRED
   * Ingredient preferences:
 
     * `likedIngredients[]`
     * `dislikedIngredients[]`
-    * (Optional) ratings.
+    * Optional ratings.
 
 * **DietRequirement**
 
   * `personId`
-  * `requirementType` (e.g., NO_GLUTEN, LOW_SODIUM, NO_NUTS)
-  * `strictness`: `HARD` (medical) or `SOFT` (strong preference)
-  * Metadata (e.g., `maxSodiumMgPerDay`).
+  * `requirementType` (NO_GLUTEN, LOW_SODIUM, NO_NUTS, etc.)
+  * `strictness`: HARD (medical) or SOFT (strong preference)
+  * Metadata (e.g., `maxSodiumMgPerDay`)
 
-These feed the **recipe filters**, planner ranking, and Autopilot safety rules.
+These feed recipe filters, planner ranking, and Autopilot safety rules.
+
+#### Nutrients & Intake
+
+* **NutrientDefinition**
+
+  * Standard macros and micros.
+
+* **SupplementDefinition**, **PrescriptionDefinition**
+
+  * Basic info, dosage forms, instructions.
+
+* **IntakeLog**
+
+  * `personId`
+  * `dateTime`
+  * `sourceType` (MEAL, SUPPLEMENT, PRESCRIPTION)
+  * Link to `Meal`/`Recipe`/`SupplementDefinition`/`PrescriptionDefinition`
+  * Amount consumed
+
+#### Plans & Scaling
+
+* **MealPlan**
+
+  * `id`, `householdId`
+  * `validFrom`, `validTo`
+  * `version`
+  * `source`: USER | AUTOPILOT | TEMPLATE
+  * Collection of:
+
+    * **MealPlanDay**:
+
+      * Date
+      * List of **MealPlanSlot**:
+
+        * Slot type (Breakfast/Lunch/Dinner/Snack/Custom)
+        * `recipeId`
+        * Optional pattern reference
+        * Participation flags (who is eating)
+        * Overrides (locked, notes, etc.)
+
+* **FamilyScalingConfig**
+
+  * Default portion distribution, meal shares, per person.
+  * Rules for rounding, min/max portions, etc.
 
 #### Cost & Budgets
 
 * **Budget**
 
   * `householdId`
-  * `scope`: `WEEKLY` or `MONTHLY`
+  * `scope`: WEEKLY or MONTHLY
   * `amount`, `currency`
-  * Optional person-level overrides.
+  * `strict`: boolean
+  * Optional person overrides.
 
 * **Store**
 
-  * `name`, `location`, external ID (from grocery API).
+  * `name`, `location`
+  * External IDs (grocery APIs)
 
 * **PriceQuote**
 
-  * `storeId`, `ingredientId`, `unitPrice`, `unit`, `timestamp`.
+  * `storeId`, `ingredientId`
+  * `unitPrice?`, `unit`
+  * `timestamp`
+  * May be missing; cost logic must treat missing values as “unknown”.
 
 * **ShoppingList**
 
-  * Generated per meal plan (and/or time window).
+  * Generated per MealPlan (or time window).
   * Collection of **ShoppingListItem**:
 
     * `ingredientId`
     * `quantity`
-    * `recipes[]` that require it.
-
-Cost Engine uses these to compute plan cost and optimizations.
+    * `unit`
+    * `recipes[]` that require it
+    * Optional selected store/product choice
 
 #### Feedback & Autopilot
 
 * **FeedbackInsight**
 
-  * `targetType` (person/household)
-  * `category` (NUTRITION, BUDGET, ADHERENCE, ECO, etc.)
-  * `severity`
+  * `id`
+  * `targetType`: PERSON or HOUSEHOLD
+  * `targetId`
+  * `category`: NUTRITION, BUDGET, ADHERENCE, MEDICAL, ECO, etc.
+  * `severity`: INFO, WARNING, CRITICAL
   * `message`
   * `recommendedAction`
-  * `dateRange`.
+  * `dateRange`
+  * Optional structured metrics payload.
 
 * **AutopilotConfig**
 
-  * `enabled` (boolean)
-  * `scope`: person / household
-  * `calorieAdjustmentBounds` (`minPercent`, `maxPercent`)
-  * `allowedRecipeSwaps` (e.g., `BREAKFAST_ONLY`, `ALL_EXCEPT_DINNER`)
+  * `targetType`: PERSON or HOUSEHOLD
+  * `targetId`
+  * `enabled`: boolean
+  * `calorieAdjustmentBounds`: min%, max%
+  * `allowedRecipeSwaps`: enum / flags (NONE, DINNERS_ONLY, ALL_EXCEPT_BREAKFAST, etc.)
   * `costSensitivity` (0–1)
-  * (Future) `ecoSensitivity` (0–1)
-  * `requireUserApproval`: `true/false`.
+  * `ecoSensitivity?` (0–1, later)
+  * `strictBudget`: boolean
+  * `requireUserApproval`: boolean
+  * Other bounds: max changes per week, meals to never touch, etc.
 
 * **AutopilotChange**
 
-  * Type (ADJUST_TARGETS, SWAP_RECIPE, CHANGE_PORTIONS, ECO_SWAP, etc.)
-  * Before/after snapshot.
-  * Linked `FeedbackInsight`.
-  * Status (APPLIED, PENDING_APPROVAL, REVERTED).
+  * `id`
+  * `targetType`, `targetId`
+  * `changeType`: ADJUST_TARGETS, SWAP_RECIPE, CHANGE_PORTIONS, ADD_MEAL, REMOVE_MEAL, ECO_SWAP, etc.
+  * `planId`, `planVersionBefore`, `planVersionAfter?`
+  * Reference to `GoalSet` / `AutopilotConfig` versions used.
+  * `explanation`: PlanChangeExplanation blob (operation, reason, metrics before/after)
+  * `status`: PENDING_APPROVAL, APPLIED, REVERTED, SKIPPED
+  * `skipReason?`: STALE_VERSION, CONSTRAINT_CONFLICT, USER_REJECTED, etc.
+  * `randomSeed` (for determinism)
 
 #### Eco (Future)
 
 * **EcoProfile**
 
-  * `householdId`
-  * Priority weights, intensity, cost bounds.
+  * As defined earlier.
 
 * **EcoImpactDefinition**
 
-  * Linked to `ingredientId` or `recipeId`.
-  * CO₂ per kg, packaging, optional water/land & ethical flags.
+  * As defined earlier; fields optional to reflect partial data.
 
 * **WasteLog**
 
-  * Food and packaging waste events.
+  * As defined earlier.
 
 * **EcoMetricSnapshot**
 
-  * Aggregated metrics per period.
+  * As defined earlier.
 
 ---
 
@@ -1531,7 +1790,7 @@ Cost Engine uses these to compute plan cost and optimizations.
 
    * Candidate recipes are:
 
-     * **Filtered** to remove any that violate HARD requirements.
+     * **Filtered** to remove any that violate HARD requirements or required diet patterns.
      * **Ranked** higher if they match REQUIRED/PREFERRED patterns.
      * De-prioritized if they include disliked ingredients.
 3. The planner computes suggested recipes that:
@@ -1543,16 +1802,21 @@ Cost Engine uses these to compute plan cost and optimizations.
    * UI clearly warns:
 
      * “This recipe contains gluten, which violates your NO_GLUTEN requirement.”
+   * Logging it is allowed (real life) but flagged for Feedback.
 
 #### 4.2.2 Cost Controls for a Meal Plan
 
-1. Household sets a weekly budget: `$150/week`.
+1. Household sets a weekly budget: `$150/week` and marks it `strict`.
 2. They design a 2-week MealPlan.
 3. Swan generates a **ShoppingList**.
-4. Cost Engine:
+4. Cost logic:
 
-   * Uses stored or fetched PriceQuotes.
-   * Computes estimated total cost.
+   * Uses stored/fetched PriceQuotes where available.
+   * Computes **estimated** total cost.
+   * Distinguishes between:
+
+     * Items with prices.
+     * Items with unknown prices (surfaced explicitly).
    * Compares to budget:
 
      * If over-budget:
@@ -1566,33 +1830,40 @@ Cost Engine uses these to compute plan cost and optimizations.
    * Accept swaps.
    * Adjust budget.
    * Choose different stores.
+6. Autopilot (if enabled) may later propose small, safe cost-oriented adjustments based on Feedback and config.
 
 #### 4.2.3 Feedback and Autopilot Adjustments
 
 1. Autopilot enabled for a person with:
 
-   * `calorieAdjustmentBounds`: `-10%` to `+10%`.
-   * `costSensitivity`: `0.7`.
+   * `calorieAdjustmentBounds`: -10% to +10%.
+   * `costSensitivity`: 0.7.
+   * `strictBudget`: true.
 2. Over a 3-week window:
 
-   * Weight is drifting up instead of down.
-   * Grocery spend is 20% over budget.
+   * Weight is drifting up rather than down.
+   * Grocery spend is ~20% over budget.
 3. Feedback Engine generates insights:
 
    * “You have averaged 12% over your calorie target.”
-   * “Spending exceeds budget by $30/week; these 3 recipes account for most overspend.”
+   * “Spending exceeds budget by ~$30/week; these 3 recipes account for most overspend.”
 4. Autopilot proposes:
 
-   * Reduce daily calorie target by 5%.
+   * Reduce daily calorie target by 5% (within bounds and above safe minimum).
    * Swap 2 expensive dinners for cheaper, nutrient-equivalent ones.
 5. If `requireUserApproval = true`:
 
-   * User reviews and accepts/rejects.
+   * User reviews each `AutopilotChange` with explanation and metrics before/after.
+   * User accepts or rejects.
 6. If `requireUserApproval = false`:
 
    * Changes are applied automatically.
    * AutopilotChange records are created.
    * User sees a summary of changes and reasons.
+7. If MealPlan version changed in the meantime:
+
+   * AutopilotChange is marked `SKIPPED` with `skipReason = STALE_VERSION`.
+   * No silent overwrite happens.
 
 #### 4.2.4 Eco Awareness and Adjustments (Future)
 
@@ -1611,9 +1882,14 @@ Cost Engine uses these to compute plan cost and optimizations.
 
    * Add a “use-up pasta” recipe to Wednesdays using likely leftover vegetables.
    * Swap one high-waste ingredient (e.g., bagged salad) for a more stable alternative (e.g., frozen mixed veg).
+   * Changes only applied if:
+
+     * Budget and DietRequirements remain satisfied.
+     * Cost increase is within `maxCostDeltaPercent`.
 5. User approves changes, seeing:
 
    * Estimated savings in waste and cost.
+   * No surprise eco trade-offs.
 
 ---
 
@@ -1639,6 +1915,20 @@ New types:
 * `FeedbackInsight`, `AutopilotConfig`, `AutopilotChange`
 * (Future) `EcoProfile`, `EcoImpactDefinition`, `WasteLog`, `EcoMetricSnapshot`
 
+**Request Context:**
+
+Every resolver runs with a `RequestContext`:
+
+* `userId`
+* `householdId`
+* `roles`: e.g., OWNER, MEMBER, ADMIN
+
+Resolvers:
+
+* Always scope DB access by `householdId` where appropriate.
+* Never issue raw Prisma queries without context-based scoping.
+* Delegate business rules to `core-domain`.
+
 Key operations (examples):
 
 * **Diet Preferences**
@@ -1659,7 +1949,7 @@ Key operations (examples):
 
   * `query feedbackInsights(targetId, dateRange)`
   * `mutation configureAutopilot(input)`
-  * `mutation applyAutopilotChange(changeId)`
+  * `mutation applyAutopilotChange(changeId)` (with version check)
   * `subscription autopilotChanges(targetId)`
   * `subscription feedbackUpdated(targetId)`
 
@@ -1670,12 +1960,7 @@ Key operations (examples):
   * `mutation logWaste(input)`
   * `query ecoMetrics(householdId, dateRange)`
 
-Backend runs scheduled jobs to:
-
-* Recompute FeedbackInsights periodically.
-* Refresh store PriceQuotes.
-* Trigger Autopilot runs.
-* (Future) Aggregate EcoMetricSnapshots.
+---
 
 ### 5.2 Implementation Details
 
@@ -1697,8 +1982,27 @@ Backend runs scheduled jobs to:
     * (Future) eco factor tables.
 * **External APIs**:
 
-  * Price data via cost-engine adapters.
-  * (Future) optional eco data (e.g., CO₂ factors, seasonality) via eco-engine adapters.
+  * Price data via cost adapters.
+  * (Future) eco data (CO₂ factors, seasonality) via eco adapters.
+
+**Optimistic locking & consistency:**
+
+* Entities that Autopilot or users both modify (MealPlan, GoalSet, AutopilotConfig) carry a `version` field.
+* Mutations include expected `version`.
+* If DB version doesn’t match:
+
+  * Mutation fails with a clear error.
+  * AutopilotChange is marked as skipped if applicable.
+
+**Source of truth discipline:**
+
+* GraphQL schema and Prisma define data shapes.
+* `core-domain` defines business rules.
+* Resolvers are thin:
+
+  * Validate inputs via GraphQL/types.
+  * Map to domain functions.
+  * Persist results via Prisma.
 
 ---
 
@@ -1708,12 +2012,12 @@ Backend runs scheduled jobs to:
 
 * **Next.js App Router**:
 
-  * Server Components for heavy data pages.
+  * Server Components for heavy data pages (dashboards, plans).
   * Client Components for editors and interactive flows.
 
-High-level routes:
+High-level routes (example):
 
-* `/` – Household dashboard
+* `/` – Today / Household dashboard
 * `/households/:id` – Family overview
 * `/people/:id` – Person overview (Body, Goals, Diet, Feedback)
 * `/plans` – Meal plans list
@@ -1725,84 +2029,154 @@ High-level routes:
 * `/feedback` – Feedback & insights feed
 * `/settings/eco` – (Future) EcoProfile and waste tracking
 
+Route structure is stable; details of navigation live in the UI.
+
+---
+
 ### 6.2 GraphQL Client & State
 
-* **Apollo Client** or **urql**:
+* **Apollo Client** or **urql** with GraphQL Codegen:
 
-  * GraphQL Codegen for typed hooks.
-* Usage pattern:
+  * Typed hooks like `useGetMealPlanQuery`, `useUpdateAutopilotConfigMutation`.
+* **Normalized cache** across the app:
 
-  * Queries: data loading.
-  * Mutations: updates.
-  * Subscriptions: real-time updates (plans, feedback, autopilot changes).
+  * Plan updates push into the cache.
+  * Autopilot subscriptions update data in place.
 
 UI-level state:
 
 * **Zustand** (or similar) for:
 
-  * Currently edited plan.
-  * Filters, UI preferences.
-  * Non-critical local state.
+  * Currently selected household/person.
+  * Filters and UI preferences.
+  * Draft plan edits (before save).
+* Router state:
 
-### 6.3 UI / UX
+  * Holds the “active section” via URL, not manual component state.
+
+---
+
+### 6.3 UI / UX & Design System
+
+* **Design system** lives in `@swan/ui`:
+
+  * Components:
+
+    * `Card`, `Button`, `Badge`, `ProgressRing`, `InsightCard`, `PersonPill`, `SectionHeader`, etc.
+  * Styling:
+
+    * Tailwind CSS with extended theme tokens.
+    * CSS variables for core tokens (colors, spacing, typography).
+* **Fonts**:
+
+  * Loaded once using `next/font`:
+
+    * Display (e.g. Fraunces)
+    * Body (e.g. Source Sans 3)
+    * Mono (e.g. JetBrains Mono)
+* **Responsiveness**:
+
+  * Desktop:
+
+    * Sidebar navigation.
+    * Grid-based layouts for metrics.
+  * Mobile:
+
+    * Bottom tab nav.
+    * Stacked cards.
+    * Horizontal scroll for person pills.
 
 Key views:
 
+* **Today View**
+
+  * Primary question: “What should we cook and watch out for today?”
+  * Sections:
+
+    * Today’s meals (per household).
+    * A compact per-person summary (collapsible).
+    * At most 2–3 high-severity insights.
+  * Everything else is accessible but not shoved in the user’s face.
+
 * **Diet Settings View**
 
-  * Pattern toggles (Vegan, Vegetarian, Paleo, etc.) with mode: Required/Preferred.
+  * Pattern toggles with Required/Preferred modes.
   * Liked/disliked ingredients.
-  * Medical requirements (No Gluten, Low Sodium, etc.).
-  * Warnings when active plans conflict.
+  * Medical requirements.
+  * Inline warnings when active plans conflict.
 
 * **Budget & Cost View**
 
-  * Configure weekly/monthly budgets.
-  * Select stores.
-  * Show:
-
-    * Plan cost vs budget.
-    * Top cost drivers.
-  * Suggest cost-saving swaps.
+  * Configure weekly/monthly budgets and strict vs flexible.
+  * Store selection.
+  * Plan cost vs budget visualizations.
+  * Top cost drivers and suggested swaps.
 
 * **Meal Plan Editor**
 
   * Calendar/grid for meals.
+  * Per-day/per-meal interactions:
+
+    * Swap recipe.
+    * Lock/unlock.
+    * Adjust participation.
   * Side panel:
 
     * Nutrient coverage vs goals.
     * Cost estimate vs budget.
     * Diet requirement compliance.
-    * (Future) Eco summary: estimated waste risk, CO₂.
+    * (Future) Eco summary.
 
 * **Feedback & Autopilot View**
 
   * Insight feed with filters (Nutrition, Budget, ECO, etc.).
-  * Autopilot status and recent changes.
-  * Ability to revert changes or adjust Autopilot settings.
+  * Autopilot status card.
+  * List of recent AutopilotChanges:
+
+    * Operation, reason, metrics before/after, status, ability to revert (where appropriate).
 
 * **Eco View (Future)**
 
-  * Simple graphs:
+  * Graphs for:
 
     * Food waste trend.
-    * Approximate CO₂ per week relative to user’s own baseline.
+    * Approximate CO₂ vs household baseline.
     * Packaging breakdown.
-  * “Practical tips” and small, low-friction actions.
+  * Simple, practical tips.
+
+**Progressive disclosure:**
+
+* Onboarding:
+
+  * Only asks for essentials:
+
+    * Who’s in your household (age, rough weight).
+    * Any hard “must avoid” foods.
+    * Rough weekly budget.
+* Advanced settings:
+
+  * Diet patterns, Autopilot bounds, eco weighting, equipment inventory.
+* In-context prompts:
+
+  * When the system notices patterns (overspend, waste, persistent deficiency), it suggests visiting the relevant settings page to fine-tune controls.
+
+---
 
 ### 6.4 Forms & Validation
 
-* **React Hook Form** + **Zod** schemas:
+* **React Hook Form** + **Zod**:
 
-  * Body Profiles
-  * Diet Preferences & Requirements
-  * Budget
-  * AutopilotConfig
-  * (Future) EcoProfile, WasteLog
+  * For UI forms:
 
-Shared types:
+    * Body Profiles
+    * Diet Preferences & Requirements
+    * Budget
+    * AutopilotConfig
+    * (Future) EcoProfile, WasteLog
+* **Zod** schemas are:
 
-* Generated from GraphQL schema: `XYZInput` types reused across client & server.
+  * Aligned with GraphQL input types.
+  * Either auto-generated or thin wrappers around input types, not separate logic.
 
 ---
 
@@ -1810,15 +2184,30 @@ Shared types:
 
 ### 7.1 What Must Be Tested Hard
 
+The following are **non-negotiable**:
+
 * **Scaling Engine Math**
 
   * Portion sizing for mixed-needs families.
+  * Invariants:
+
+    * No negative portions.
+    * Totals consistent with planned servings (within rounding).
+    * Toddler portions never exceeding adult portions for the same meal.
 
 * **Nutrient Coverage Calculations**
+
+  * Per meal / day / week vs GoalSets.
+  * Inclusion of supplements and state-based target modifications.
 
 * **Budget and Cost Estimation**
 
   * Stability under price changes.
+  * Correct handling of:
+
+    * Known vs unknown prices.
+    * Multiple stores.
+    * Strict vs flexible budgets.
 
 * **Constraint Handling**
 
@@ -1826,24 +2215,81 @@ Shared types:
 
     * Planner suggestions.
     * Autopilot changes.
+  * Required diet patterns always honored.
 
 * **Autopilot Adjustments**
 
-  * Respect bounds, preferences, budgets.
+  * Respect all bounds:
+
+    * Calorie adjustment bounds.
+    * Max changes per run.
+    * “Do not touch” meal settings.
+  * Respect strict budgets when configured.
+  * Always attach a PlanChangeExplanation.
+
+* **Versioning & Concurrency**
+
+  * Optimistic locking across MealPlan, GoalSet, AutopilotConfig.
+  * Autopilot does not overwrite user edits or stale plans.
 
 * **(Future) Eco Calculations**
 
-  * Waste rate & CO₂ calculations are consistent & explainable (even if approximate).
+  * Waste rate & CO₂ calculations are consistent and clearly tagged as estimates.
+  * Partial data handled safely and explicitly.
 
-### 7.2 Tooling
+### 7.2 Testing Strategy
 
-* Unit tests: **Vitest** or **Jest**.
-* Integration tests: GraphQL API + Prisma test DB.
-* E2E tests: **Playwright** or **Cypress**:
+* **Unit tests** (Vitest/Jest):
 
-  * Core flows:
+  * `core-domain` functions:
 
-    * Create household, set preferences, build plan, see budget & feedback, enable Autopilot, observe changes.
+    * Nutrient math.
+    * Planner scoring.
+    * Family scaling.
+    * Cost & budget logic.
+    * Feedback rules.
+    * Autopilot decision logic.
+  * Use property-based tests (where reasonable) for scaling invariants.
+
+* **Integration tests**:
+
+  * GraphQL API + Prisma test DB.
+  * Typical flows:
+
+    * “Create household → setup goals → generate plan → get shopping list → compute feedback.”
+
+* **Scenario/E2E tests** (Playwright/Cypress):
+
+  * Run end-to-end flows in a browser-like environment:
+
+    * **Scenario 1**: Celiac pregnancy with tight budget.
+
+      * Ensure:
+
+        * No gluten in plans.
+        * Budget respected or explicit constraint conflict.
+        * Autopilot adjusts conservatively and explainably.
+    * **Scenario 2**: Marathon runner + picky kids + nut allergy.
+
+      * Ensure:
+
+        * Portion logic makes sense.
+        * No nut contamination in kid meals.
+        * Planner doesn’t starve the runner to meet budget; instead, chooses cheaper energy-dense recipes.
+    * **Scenario 3**: Eco-focused household with gentle settings.
+
+      * Ensure:
+
+        * WasteLog-driven suggestions.
+        * Eco swaps stay within cost and constraints.
+
+* **Performance guardrails**:
+
+  * Example: For a 4-person, 2-week plan, planner should complete within a few seconds at P95.
+  * If constrained search hits time caps:
+
+    * Return best-evaluated plan so far.
+    * Mark it as “draft (can be improved)” rather than silently timing out.
 
 ---
 
@@ -1871,7 +2317,7 @@ docker compose up -d
 
 # Env
 cp .env.example .env
-# fill in DB, Redis, any API keys for price providers (optional in dev)
+# Fill in DB, Redis, any API keys for price providers (optional in dev)
 
 # DB
 pnpm db:migrate
@@ -1893,7 +2339,7 @@ pnpm dev:web       # web only
 
 pnpm test          # all tests
 pnpm lint          # ESLint
-pnpm typecheck     # tsc
+pnpm typecheck     # TypeScript typechecking
 
 pnpm db:studio     # Prisma Studio
 pnpm db:migrate    # apply migrations
@@ -1906,10 +2352,13 @@ pnpm db:migrate    # apply migrations
 ### 9.1 Goals
 
 1. **Make eating well dramatically easier for families.**
-2. **Respect real-world constraints**: physiology, preferences, medical requirements, money, and (optionally) eco impact.
+2. **Respect real-world constraints**:
+
+   * Physiology, temporary states, preferences, medical requirements, money, and (optionally) eco impact.
 3. **Make nutritional adequacy visible and actionable.**
-4. **Provide a semi-automated “Autopilot” that makes safe, conservative adjustments.**
-5. **Lay a clean foundation for future exercise, medical, mental health, eco, and longevity features.**
+4. **Provide a semi-automated “Autopilot” that makes safe, conservative, explainable adjustments.**
+5. **Lay a clean foundation** for future exercise, medical, mental health, eco, and longevity features.
+6. **Keep the domain logic centralized and testable** in `core-domain`, with thin orchestration layers.
 
 ### 9.2 Non-Goals (for initial versions)
 
@@ -1929,23 +2378,37 @@ Autopilot is **rule-based and data-driven**, not a black-box “magic AI brain.�
 
 ## 10. Contributing
 
-* Strict TypeScript.
-* No `any` in core domains (`domain`, `cost-engine`, `feedback-engine`, `eco-engine`).
-* Changes to:
+Core principles:
 
-  * Nutrient math
-  * Scaling math
-  * Budget calculation
-  * Autopilot logic
-  * Eco impact calculations
-    **must include tests and documented assumptions**.
+* Strict TypeScript in **core-domain**.
+
+  * No `any` in nutrition, scaling, budget, Autopilot, or eco logic.
+* Business rules live in `core-domain`:
+
+  * Resolvers and components should call domain functions; they should not re-implement logic.
+
+Changes to:
+
+* Nutrient math
+* Scaling math
+* Budget & cost calculation
+* Planner scoring & constraints
+* Autopilot logic
+* Eco impact calculations
+
+**must include**:
+
+* Tests (unit + scenario where relevant)
+* Documented assumptions (in docs/ or comments)
+* Updated type definitions where needed
 
 Process:
 
 1. Open an issue or proposal for substantial changes.
-2. Collaborate on design in `docs/`.
-3. Implement with tests + type safety.
-4. Submit PR, pass CI, review, merge.
+2. Collaborate on design in `docs/` (Architecture Decision Records, design notes).
+3. Implement in `core-domain` first, then wire to API/UI.
+4. Add tests + type safety.
+5. Submit PR, pass CI, review, merge.
 
 ---
 
@@ -1953,15 +2416,40 @@ Process:
 
 If you’ve actually internalized Swan Health at this point, you should be able to explain:
 
-1. **How DietPreferences and DietRequirements differ, and how the planner uses each.**
-2. **How the Cost Engine plugs into Meal Plans and Budget to suggest cheaper alternatives.**
-3. **How Feedback + Autopilot work together without violating hard constraints.**
-4. **How an EcoProfile could influence meal planning without ever overriding health or budget safety.**
+1. **How DietPreferences and DietRequirements differ, and how the planner uses each:**
 
-If you can’t explain those, you don’t really understand the system yet.
+   * Which are hard constraints vs soft preferences.
+   * How they influence filtering vs ranking.
+
+2. **How the Cost layer plugs into MealPlans and Budgets:**
+
+   * How ShoppingLists and PriceQuotes are used.
+   * How strict vs flexible budgets affect planner and Autopilot behavior.
+   * How unknown prices are handled safely.
+
+3. **How Feedback + Autopilot work together without violating hard constraints:**
+
+   * The role of FeedbackInsight.
+   * AutopilotConfig bounds.
+   * Autopilot invariants (medical, budget, scope, explainability, version safety).
+
+4. **How GoalSets and MealPlans are versioned and time-bound:**
+
+   * Why we never mutate them in place.
+   * How optimistic locking prevents Autopilot from clobbering user edits.
+
+5. **How the Family Scaling Engine keeps shared cooking sane while respecting per-person needs:**
+
+   * What invariants it must maintain.
+   * Why micros are handled mostly at the planner level, not scaling.
+
+6. **How an EcoProfile can influence planning without ever overriding health or budget safety:**
+
+   * How eco weights and `maxCostDeltaPercent` interact.
+   * How eco suggestions are framed as optional, “nice to have” improvements.
+
+If you can’t explain those in your own words, you don’t really understand the system yet.
 
 ---
 
 **Swan Health** — *Designed for real people, real families, real constraints.*
-
-
